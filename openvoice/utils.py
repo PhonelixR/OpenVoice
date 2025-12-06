@@ -14,7 +14,7 @@ def get_hparams_from_file(config_path):
 class HParams:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
-            if type(v) == dict:
+            if isinstance(v, dict):  # Cambiado de type(v) == dict a isinstance
                 v = HParams(**v)
             self[k] = v
 
@@ -54,8 +54,8 @@ def string_to_bits(string, pad_len=8):
     bit_arrays = [[int(bit) for bit in binary] for binary in binary_values]
     
     # Convert list of arrays to NumPy array
-    numpy_array = np.array(bit_arrays)
-    numpy_array_full = np.zeros((pad_len, 8), dtype=numpy_array.dtype)
+    numpy_array = np.array(bit_arrays, dtype=np.uint8)  # Especificar dtype explícitamente
+    numpy_array_full = np.zeros((pad_len, 8), dtype=np.uint8)  # Especificar dtype explícitamente
     numpy_array_full[:, 2] = 1
     max_len = min(pad_len, len(numpy_array))
     numpy_array_full[:max_len] = numpy_array[:max_len]
