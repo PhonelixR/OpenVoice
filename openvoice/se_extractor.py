@@ -4,28 +4,29 @@ import torch
 import hashlib
 import librosa
 import base64
-from glob import glob
 import numpy as np
 from pydub import AudioSegment
 from faster_whisper import WhisperModel
-import hashlib
-import base64
-import librosa
 from whisper_timestamped.transcribe import get_audio_tensor, get_vad_segments
 
 model_size = "medium"
-# Run on GPU with FP16
 model = None
+
 def split_audio_whisper(audio_path, audio_name, target_dir='processed'):
     global model
     if model is None:
-        model = WhisperModel(model_size, device="cuda", compute_type="float16")
+        # Usar CPU si no hay GPU disponible
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device == "cuda" else "float32"
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    
     audio = AudioSegment.from_file(audio_path)
     max_len = len(audio)
 
     target_folder = os.path.join(target_dir, audio_name)
     
-    segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
+    # Actualizado para faster-whisper 1.2.1
+    segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True, vad_filter=True)
     segments = list(segments)    
 
     # create directory
@@ -76,6 +77,7 @@ def split_audio_whisper(audio_path, audio_name, target_dir='processed'):
 
 def split_audio_vad(audio_path, audio_name, target_dir, split_seconds=10.0):
     SAMPLE_RATE = 16000
+    # Actualizado para librosa 0.11.0 y whisper-timestamped 1.15.9
     audio_vad = get_audio_tensor(audio_path)
     segments = get_vad_segments(
         audio_vad,
@@ -87,6 +89,7 @@ def split_audio_vad(audio_path, audio_name, target_dir, split_seconds=10.0):
     segments = [(seg["start"], seg["end"]) for seg in segments]
     segments = [(float(s) / SAMPLE_RATE, float(e) / SAMPLE_RATE) for s,e in segments]
     print(segments)
+    
     audio_active = AudioSegment.silent(duration=0)
     audio = AudioSegment.from_file(audio_path)
 
@@ -95,9 +98,11 @@ def split_audio_vad(audio_path, audio_name, target_dir, split_seconds=10.0):
     
     audio_dur = audio_active.duration_seconds
     print(f'after vad: dur = {audio_dur}')
+    
     target_folder = os.path.join(target_dir, audio_name)
     wavs_folder = os.path.join(target_folder, 'wavs')
     os.makedirs(wavs_folder, exist_ok=True)
+    
     start_time = 0.
     count = 0
     num_splits = int(np.round(audio_dur / split_seconds))
@@ -113,10 +118,12 @@ def split_audio_vad(audio_path, audio_name, target_dir, split_seconds=10.0):
         audio_seg.export(output_file, format='wav')
         start_time = end_time
         count += 1
+    
     return wavs_folder
 
 def hash_numpy_array(audio_path):
-    array, _ = librosa.load(audio_path, sr=None, mono=True)
+    # Actualizado para librosa 0.11.0: especificar dtype
+    array, _ = librosa.load(audio_path, sr=None, mono=True, dtype=np.float32)
     # Convert the array to bytes
     array_bytes = array.tobytes()
     # Calculate the hash of the array bytes
@@ -134,20 +141,24 @@ def get_se(audio_path, vc_model, target_dir='processed', vad=True):
     audio_name = f"{os.path.basename(audio_path).rsplit('.', 1)[0]}_{version}_{hash_numpy_array(audio_path)}"
     se_path = os.path.join(target_dir, audio_name, 'se.pth')
 
-    # if os.path.isfile(se_path):
-    #     se = torch.load(se_path).to(device)
-    #     return se, audio_name
-    # if os.path.isdir(audio_path):
-    #     wavs_folder = audio_path
+    # Comprobación y carga de embedding si ya existe
+    if os.path.isfile(se_path):
+        try:
+            se = torch.load(se_path, map_location=device, weights_only=False)
+            return se, audio_name
+        except Exception as e:
+            print(f"Error loading existing se.pth, regenerating: {e}")
     
+    # Si no existe o hay error, generamos uno nuevo
     if vad:
         wavs_folder = split_audio_vad(audio_path, target_dir=target_dir, audio_name=audio_name)
     else:
         wavs_folder = split_audio_whisper(audio_path, target_dir=target_dir, audio_name=audio_name)
     
-    audio_segs = glob(f'{wavs_folder}/*.wav')
+    audio_segs = glob.glob(f'{wavs_folder}/*.wav')
     if len(audio_segs) == 0:
         raise NotImplementedError('No audio segments found!')
     
-    return vc_model.extract_se(audio_segs, se_save_path=se_path), audio_name
-
+    # Extraer el speaker embedding
+    se = vc_model.extract_se(audio_segs, se_save_path=se_path)
+    return se, audio_name
