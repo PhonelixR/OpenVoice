@@ -8,18 +8,31 @@ hyperparameter. Some cleaners are English-specific. You'll typically want to use
   1. "english_cleaners" for English text
   2. "transliteration_cleaners" for non-English text that can be transliterated to ASCII using
      the Unidecode library (https://pypi.python.org/pypi/Unidecode)
-  3. "basic_cleaners" if you do not want to transliterate (in this case, you should also update
+  3. "basic_cleaners" if you do not want to transliterat (in this case, you should also update
      the symbols in symbols.py to match your data).
 '''
 
 
 # Regular expression matching whitespace:
-
-
 import re
 import inflect
 from unidecode import unidecode
-import eng_to_ipa as ipa
+
+# Intentar importar eng_to_ipa, con fallback alternativo
+try:
+    import eng_to_ipa as ipa
+    ENG_TO_IPA_AVAILABLE = True
+except ImportError:
+    ENG_TO_IPA_AVAILABLE = False
+    # Crear un sustituto simple para eng_to_ipa
+    class SimpleIPAConverter:
+        @staticmethod
+        def convert(text):
+            # Un sustituto muy básico que simplemente devuelve el texto
+            # En un caso real, necesitarías una implementación mejor
+            return text
+    ipa = SimpleIPAConverter()
+
 _inflect = inflect.engine()
 _comma_number_re = re.compile(r'([0-9][0-9\,]+[0-9])')
 _decimal_number_re = re.compile(r'([0-9]+\.[0-9]+)')
@@ -29,7 +42,7 @@ _ordinal_re = re.compile(r'[0-9]+(st|nd|rd|th)')
 _number_re = re.compile(r'[0-9]+')
 
 # List of (regular expression, replacement) pairs for abbreviations:
-_abbreviations = [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [
+_abbreviations = [(re.compile(r'\b%s\.' % re.escape(x[0]), re.IGNORECASE), x[1]) for x in [
     ('mrs', 'misess'),
     ('mr', 'mister'),
     ('dr', 'doctor'),
@@ -52,7 +65,7 @@ _abbreviations = [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in 
 
 
 # List of (ipa, lazy ipa) pairs:
-_lazy_ipa = [(re.compile('%s' % x[0]), x[1]) for x in [
+_lazy_ipa = [(re.compile(re.escape(x[0])), x[1]) for x in [
     ('r', 'ɹ'),
     ('æ', 'e'),
     ('ɑ', 'a'),
@@ -68,7 +81,7 @@ _lazy_ipa = [(re.compile('%s' % x[0]), x[1]) for x in [
 ]]
 
 # List of (ipa, lazy ipa2) pairs:
-_lazy_ipa2 = [(re.compile('%s' % x[0]), x[1]) for x in [
+_lazy_ipa2 = [(re.compile(re.escape(x[0])), x[1]) for x in [
     ('r', 'ɹ'),
     ('ð', 'z'),
     ('θ', 's'),
@@ -78,7 +91,7 @@ _lazy_ipa2 = [(re.compile('%s' % x[0]), x[1]) for x in [
 ]]
 
 # List of (ipa, ipa2) pairs
-_ipa_to_ipa2 = [(re.compile('%s' % x[0]), x[1]) for x in [
+_ipa_to_ipa2 = [(re.compile(re.escape(x[0])), x[1]) for x in [
     ('r', 'ɹ'),
     ('ʤ', 'dʒ'),
     ('ʧ', 'tʃ')
@@ -92,7 +105,7 @@ def expand_abbreviations(text):
 
 
 def collapse_whitespace(text):
-    return re.sub(r'\s+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
 
 
 def _remove_commas(m):
@@ -130,10 +143,10 @@ def _expand_ordinal(m):
 
 def _expand_number(m):
     num = int(m.group(0))
-    if num > 1000 and num < 3000:
+    if 1000 < num < 3000:
         if num == 2000:
             return 'two thousand'
-        elif num > 2000 and num < 2010:
+        elif 2000 < num < 2010:
             return 'two thousand ' + _inflect.number_to_words(num % 100)
         elif num % 100 == 0:
             return _inflect.number_to_words(num // 100) + ' hundred'
@@ -158,15 +171,27 @@ def mark_dark_l(text):
 
 
 def english_to_ipa(text):
+    """Convert English text to IPA notation."""
     text = unidecode(text).lower()
     text = expand_abbreviations(text)
     text = normalize_numbers(text)
-    phonemes = ipa.convert(text)
+    
+    if ENG_TO_IPA_AVAILABLE:
+        try:
+            phonemes = ipa.convert(text)
+        except Exception as e:
+            print(f"Warning: eng_to_ipa conversion failed: {e}")
+            phonemes = text  # Fallback to plain text
+    else:
+        print("Warning: eng_to_ipa not available, using fallback")
+        phonemes = text  # Fallback to plain text
+    
     phonemes = collapse_whitespace(phonemes)
     return phonemes
 
 
 def english_to_lazy_ipa(text):
+    """Convert English text to lazy IPA notation."""
     text = english_to_ipa(text)
     for regex, replacement in _lazy_ipa:
         text = re.sub(regex, replacement, text)
@@ -174,6 +199,7 @@ def english_to_lazy_ipa(text):
 
 
 def english_to_ipa2(text):
+    """Convert English text to IPA2 notation."""
     text = english_to_ipa(text)
     text = mark_dark_l(text)
     for regex, replacement in _ipa_to_ipa2:
@@ -182,7 +208,32 @@ def english_to_ipa2(text):
 
 
 def english_to_lazy_ipa2(text):
+    """Convert English text to lazy IPA2 notation."""
     text = english_to_ipa(text)
     for regex, replacement in _lazy_ipa2:
         text = re.sub(regex, replacement, text)
     return text
+
+
+# Funciones de limpieza adicionales para compatibilidad
+def english_cleaners(text):
+    """Clean English text for TTS processing."""
+    text = english_to_ipa2(text)
+    return text
+
+
+def english_cleaners2(text):
+    """Alternative English cleaner using lazy IPA2."""
+    text = english_to_lazy_ipa2(text)
+    return text
+
+
+# Función para verificar la disponibilidad de las dependencias
+def check_dependencies():
+    """Check if all dependencies are available."""
+    dependencies = {
+        'inflect': 'ok',
+        'unidecode': 'ok',
+        'eng_to_ipa': 'available' if ENG_TO_IPA_AVAILABLE else 'missing (using fallback)'
+    }
+    return dependencies
