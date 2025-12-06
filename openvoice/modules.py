@@ -4,7 +4,13 @@ from torch import nn
 from torch.nn import functional as F
 
 from torch.nn import Conv1d
-from torch.nn.utils import weight_norm, remove_weight_norm
+# Actualizado para PyTorch 2.x: usar parametrizations en lugar de utils para weight_norm
+# Importación condicional para compatibilidad con PyTorch 1.x y 2.x
+try:
+    from torch.nn.utils.parametrizations import weight_norm, remove_weight_norm
+except ImportError:
+    # Fallback para versiones anteriores de PyTorch
+    from torch.nn.utils import weight_norm, remove_weight_norm
 
 from openvoice import commons
 from openvoice.commons import init_weights, get_padding
@@ -157,7 +163,8 @@ class WN(torch.nn.Module):
             cond_layer = torch.nn.Conv1d(
                 gin_channels, 2 * hidden_channels * n_layers, 1
             )
-            self.cond_layer = torch.nn.utils.weight_norm(cond_layer, name="weight")
+            # Actualizado para usar la función weight_norm importada
+            self.cond_layer = weight_norm(cond_layer, name="weight")
 
         for i in range(n_layers):
             dilation = dilation_rate**i
@@ -169,7 +176,8 @@ class WN(torch.nn.Module):
                 dilation=dilation,
                 padding=padding,
             )
-            in_layer = torch.nn.utils.weight_norm(in_layer, name="weight")
+            # Actualizado para usar la función weight_norm importada
+            in_layer = weight_norm(in_layer, name="weight")
             self.in_layers.append(in_layer)
 
             # last one is not necessary
@@ -179,7 +187,8 @@ class WN(torch.nn.Module):
                 res_skip_channels = hidden_channels
 
             res_skip_layer = torch.nn.Conv1d(hidden_channels, res_skip_channels, 1)
-            res_skip_layer = torch.nn.utils.weight_norm(res_skip_layer, name="weight")
+            # Actualizado para usar la función weight_norm importada
+            res_skip_layer = weight_norm(res_skip_layer, name="weight")
             self.res_skip_layers.append(res_skip_layer)
 
     def forward(self, x, x_mask, g=None, **kwargs):
@@ -211,11 +220,11 @@ class WN(torch.nn.Module):
 
     def remove_weight_norm(self):
         if self.gin_channels != 0:
-            torch.nn.utils.remove_weight_norm(self.cond_layer)
+            remove_weight_norm(self.cond_layer)
         for l in self.in_layers:
-            torch.nn.utils.remove_weight_norm(l)
+            remove_weight_norm(l)
         for l in self.res_skip_layers:
-            torch.nn.utils.remove_weight_norm(l)
+            remove_weight_norm(l)
 
 
 class ResBlock1(torch.nn.Module):
