@@ -67,9 +67,10 @@ def unconstrained_rational_quadratic_spline(
 
     if tails == "linear":
         unnormalized_derivatives = F.pad(unnormalized_derivatives, pad=(1, 1))
-        constant = np.log(np.exp(1 - min_derivative) - 1)
-        unnormalized_derivatives[..., 0] = constant
-        unnormalized_derivatives[..., -1] = constant
+        # Actualizado: usar torch en lugar de numpy para consistencia
+        constant = torch.log(torch.exp(torch.tensor(1 - min_derivative)) - 1)
+        unnormalized_derivatives[..., 0] = constant.to(unnormalized_derivatives.device)
+        unnormalized_derivatives[..., -1] = constant.to(unnormalized_derivatives.device)
 
         outputs[outside_interval_mask] = inputs[outside_interval_mask]
         logabsdet[outside_interval_mask] = 0
