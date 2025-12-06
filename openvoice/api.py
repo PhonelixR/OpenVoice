@@ -33,7 +33,8 @@ class OpenVoiceBaseClass(object):
         self.device = device
 
     def load_ckpt(self, ckpt_path):
-        checkpoint_dict = torch.load(ckpt_path, map_location=torch.device(self.device))
+        # Actualizado para compatibilidad con torch.load más reciente
+        checkpoint_dict = torch.load(ckpt_path, map_location=torch.device(self.device), weights_only=False)
         a, b = self.model.load_state_dict(checkpoint_dict['model'], strict=False)
         print("Loaded checkpoint '{}'".format(ckpt_path))
         print('missing/unexpected keys:', a, b)
@@ -109,8 +110,6 @@ class ToneColorConverter(OpenVoiceBaseClass):
             self.watermark_model = None
         self.version = getattr(self.hps, '_version_', "v1")
 
-
-
     def extract_se(self, ref_wav_list, se_save_path=None):
         if isinstance(ref_wav_list, str):
             ref_wav_list = [ref_wav_list]
@@ -120,7 +119,8 @@ class ToneColorConverter(OpenVoiceBaseClass):
         gs = []
         
         for fname in ref_wav_list:
-            audio_ref, sr = librosa.load(fname, sr=hps.data.sampling_rate)
+            # Actualizado para librosa 0.11.0 - asegurar tipo float32
+            audio_ref, sr = librosa.load(fname, sr=hps.data.sampling_rate, dtype=np.float32)
             y = torch.FloatTensor(audio_ref)
             y = y.to(device)
             y = y.unsqueeze(0)
@@ -140,8 +140,8 @@ class ToneColorConverter(OpenVoiceBaseClass):
 
     def convert(self, audio_src_path, src_se, tgt_se, output_path=None, tau=0.3, message="default"):
         hps = self.hps
-        # load audio
-        audio, sample_rate = librosa.load(audio_src_path, sr=hps.data.sampling_rate)
+        # load audio - actualizado para librosa 0.11.0
+        audio, sample_rate = librosa.load(audio_src_path, sr=hps.data.sampling_rate, dtype=np.float32)
         audio = torch.tensor(audio).float()
         
         with torch.no_grad():
@@ -199,4 +199,3 @@ class ToneColorConverter(OpenVoiceBaseClass):
         bits = np.stack(bits).reshape(-1, 8)
         message = utils.bits_to_string(bits)
         return message
-    
