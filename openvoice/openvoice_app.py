@@ -2,7 +2,6 @@ import os
 import torch
 import argparse
 import gradio as gr
-from zipfile import ZipFile
 import langid
 from openvoice import se_extractor
 from openvoice.api import BaseSpeakerTTS, ToneColorConverter
@@ -27,9 +26,9 @@ tone_color_converter = ToneColorConverter(f'{ckpt_converter}/config.json', devic
 tone_color_converter.load_ckpt(f'{ckpt_converter}/checkpoint.pth')
 
 # load speaker embeddings
-en_source_default_se = torch.load(f'{en_ckpt_base}/en_default_se.pth', map_location=device, weights_only=False)
-en_source_style_se = torch.load(f'{en_ckpt_base}/en_style_se.pth', map_location=device, weights_only=False)
-zh_source_se = torch.load(f'{zh_ckpt_base}/zh_default_se.pth', map_location=device, weights_only=False)
+en_source_default_se = torch.load(f'{en_ckpt_base}/en_default_se.pth').to(device)
+en_source_style_se = torch.load(f'{en_ckpt_base}/en_style_se.pth').to(device)
+zh_source_se = torch.load(f'{zh_ckpt_base}/zh_default_se.pth').to(device)
 
 # This online demo mainly supports English and Chinese
 supported_languages = ['zh', 'en']
@@ -40,6 +39,7 @@ def predict(prompt, style, audio_file_pth, agree):
     # agree with the terms
     if agree == False:
         text_hint += '[ERROR] Please accept the Terms & Condition!\n'
+        gr.Warning("Please accept the Terms & Condition!")
         return (
             text_hint,
             None,
@@ -52,18 +52,22 @@ def predict(prompt, style, audio_file_pth, agree):
 
     if language_predicted not in supported_languages:
         text_hint += f"[ERROR] The detected language {language_predicted} for your input text is not in our Supported Languages: {supported_languages}\n"
+        gr.Warning(
+            f"The detected language {language_predicted} for your input text is not in our Supported Languages: {supported_languages}"
+        )
         return (
             text_hint,
             None,
             None,
         )
-    
+
     if language_predicted == "zh":
         tts_model = zh_base_speaker_tts
         source_se = zh_source_se
         language = 'Chinese'
         if style not in ['default']:
             text_hint += f"[ERROR] The style {style} is not supported for Chinese, which should be in ['default']\n"
+            gr.Warning(f"The style {style} is not supported for Chinese, which should be in ['default']")
             return (
                 text_hint,
                 None,
@@ -79,6 +83,7 @@ def predict(prompt, style, audio_file_pth, agree):
         language = 'English'
         if style not in ['default', 'whispering', 'shouting', 'excited', 'cheerful', 'terrified', 'angry', 'sad', 'friendly']:
             text_hint += f"[ERROR] The style {style} is not supported for English, which should be in ['default', 'whispering', 'shouting', 'excited', 'cheerful', 'terrified', 'angry', 'sad', 'friendly']\n"
+            gr.Warning(f"The style {style} is not supported for English, which should be in ['default', 'whispering', 'shouting', 'excited', 'cheerful', 'terrified', 'angry', 'sad', 'friendly']")
             return (
                 text_hint,
                 None,
@@ -89,6 +94,7 @@ def predict(prompt, style, audio_file_pth, agree):
 
     if len(prompt) < 2:
         text_hint += f"[ERROR] Please give a longer prompt text \n"
+        gr.Warning("Please give a longer prompt text")
         return (
             text_hint,
             None,
@@ -96,17 +102,23 @@ def predict(prompt, style, audio_file_pth, agree):
         )
     if len(prompt) > 200:
         text_hint += f"[ERROR] Text length limited to 200 characters for this demo, please try shorter text. You can clone our open-source repo and try for your usage \n"
+        gr.Warning(
+            "Text length limited to 200 characters for this demo, please try shorter text. You can clone our open-source repo for your usage"
+        )
         return (
             text_hint,
             None,
             None,
         )
-    
+
     # note diffusion_conditioning not used on hifigan (default mode), it will be empty but need to pass it to model.inference
     try:
         target_se, audio_name = se_extractor.get_se(speaker_wav, tone_color_converter, target_dir='processed', vad=True)
     except Exception as e:
         text_hint += f"[ERROR] Get target tone color error {str(e)} \n"
+        gr.Warning(
+            f"[ERROR] Get target tone color error {str(e)} \n"
+        )
         return (
             text_hint,
             None,
@@ -134,23 +146,10 @@ def predict(prompt, style, audio_file_pth, agree):
         speaker_wav,
     )
 
-
-
 title = "MyShell OpenVoice"
 
 description = """
 We introduce OpenVoice, a versatile instant voice cloning approach that requires only a short audio clip from the reference speaker to replicate their voice and generate speech in multiple languages. OpenVoice enables granular control over voice styles, including emotion, accent, rhythm, pauses, and intonation, in addition to replicating the tone color of the reference speaker. OpenVoice also achieves zero-shot cross-lingual voice cloning for languages not included in the massive-speaker training set.
-"""
-
-markdown_table = """
-<div align="center" style="margin-bottom: 10px;">
-
-|               |               |               |
-| :-----------: | :-----------: | :-----------: | 
-| **OpenSource Repo** | **Project Page** | **Join the Community** |        
-| <div style='text-align: center;'><a style="display:inline-block,align:center" href='https://github.com/myshell-ai/OpenVoice'><img src='https://img.shields.io/github/stars/myshell-ai/OpenVoice?style=social' /></a></div> | [OpenVoice](https://research.myshell.ai/open-voice) | [![Discord](https://img.shields.io/discord/1122227993805336617?color=%239B59B6&label=%20Discord%20)](https://discord.gg/myshell) |
-
-</div>
 """
 
 markdown_table_v2 = """
@@ -158,14 +157,15 @@ markdown_table_v2 = """
 
 |               |               |               |              |
 | :-----------: | :-----------: | :-----------: | :-----------: | 
-| **OpenSource Repo** | <div style='text-align: center;'><a style="display:inline-block,align:center" href='https://github.com/myshell-ai/OpenVoice'><img src='https://img.shields.io/github/stars/myshell-ai/OpenVoice?style=social' /></a></div> |  **Project Page** |  [OpenVoice](https://research.myshell.ai/open-voice) |     
+| OpenSource Repo | <div style='text-align: center;'><a style="display:inline-block,align:center" href='https://github.com/myshell-ai/OpenVoice'><img src='https://img.shields.io/github/stars/myshell-ai/OpenVoice?style=social' /></a></div> |  Project Page |  [OpenVoice](https://research.myshell.ai/open-voice) |     
 
 | | |
 | :-----------: | :-----------: |
-**Join the Community** |   [![Discord](https://img.shields.io/discord/1122227993805336617?color=%239B59B6&label=%20Discord%20)](https://discord.gg/myshell) |
+Join the Community |   [![Discord](https://img.shields.io/discord/1122227993805336617?color=%239B59B6&label=%20Discord%20)](https://discord.gg/myshell) |
 
 </div>
 """
+
 content = """
 <div>
   <strong>If the generated voice does not sound like the reference voice, please refer to <a href='https://github.com/myshell-ai/OpenVoice/blob/main/docs/QA.md'>this QnA</a>.</strong> <strong>For multi-lingual & cross-lingual examples, please refer to <a href='https://github.com/myshell-ai/OpenVoice/blob/main/demo_part2.ipynb'>this jupyter notebook</a>.</strong>
@@ -173,7 +173,6 @@ content = """
 </div>
 """
 wrapped_markdown_content = f"<div style='border: 1px solid #000; padding: 10px;'>{content}</div>"
-
 
 examples = [
     [
@@ -195,21 +194,7 @@ examples = [
     ],
 ]
 
-# Definir el tema CSS personalizado para mejor apariencia
-css = """
-.gradio-container {
-    max-width: 1200px !important;
-    margin: auto;
-}
-#send-btn {
-    background: linear-gradient(45deg, #FF6B6B, #FFE66D);
-    border: none;
-    color: white;
-    font-weight: bold;
-}
-"""
-
-with gr.Blocks(analytics_enabled=False, css=css) as demo:
+with gr.Blocks(analytics_enabled=False) as demo:
     with gr.Row():
         with gr.Column():
             with gr.Row():
@@ -224,7 +209,7 @@ with gr.Blocks(analytics_enabled=False, css=css) as demo:
                 gr.Markdown(description)
         with gr.Column():
             gr.Video('https://github.com/myshell-ai/OpenVoice/assets/40556743/3cba936f-82bf-476c-9e52-09f0f417bb2f', autoplay=True)
-            
+
     with gr.Row():
         gr.HTML(wrapped_markdown_content)
 
@@ -234,7 +219,6 @@ with gr.Blocks(analytics_enabled=False, css=css) as demo:
                 label="Text Prompt",
                 info="One or two sentences at a time is better. Up to 200 text characters.",
                 value="He hoped there would be stew for dinner, turnips and carrots and bruised potatoes and fat mutton pieces to be ladled out in thick, peppered, flour-fattened sauce.",
-                lines=3,
             )
             style_gr = gr.Dropdown(
                 label="Style",
@@ -243,8 +227,7 @@ with gr.Blocks(analytics_enabled=False, css=css) as demo:
                 value="default",
             )
             ref_gr = gr.Audio(
-                label="Reference Audio",
-                info="Click on the ✎ button to upload your own target speaker audio",
+                label="Reference Audio - Click on the ✎ button to upload your own target speaker audio",
                 type="filepath",
                 value="resources/demo_speaker2.mp3",
             )
@@ -254,34 +237,20 @@ with gr.Blocks(analytics_enabled=False, css=css) as demo:
                 info="I agree to the terms of the cc-by-nc-4.0 license-: https://github.com/myshell-ai/OpenVoice/blob/main/LICENSE",
             )
 
-            tts_button = gr.Button("Send", elem_id="send-btn", variant="primary")
+            tts_button = gr.Button("Send", elem_id="send-btn", visible=True)
 
         with gr.Column():
-            out_text_gr = gr.Textbox(label="Info", interactive=False, lines=4)
+            out_text_gr = gr.Textbox(label="Info")
             audio_gr = gr.Audio(label="Synthesised Audio", autoplay=True)
             ref_audio_gr = gr.Audio(label="Reference Audio Used")
 
-            # Actualizado para Gradio 5: usar examples_per_page en lugar de cache_examples
-            gr.Examples(
-                examples=examples,
-                label="Examples",
-                inputs=[input_text_gr, style_gr, ref_gr, tos_gr],
-                outputs=[out_text_gr, audio_gr, ref_audio_gr],
-                fn=predict,
-                examples_per_page=3,
-            )
-            
-    tts_button.click(
-        fn=predict, 
-        inputs=[input_text_gr, style_gr, ref_gr, tos_gr], 
-        outputs=[out_text_gr, audio_gr, ref_audio_gr]
-    )
+            gr.Examples(examples,
+                        label="Examples",
+                        inputs=[input_text_gr, style_gr, ref_gr, tos_gr],
+                        outputs=[out_text_gr, audio_gr, ref_audio_gr],
+                        fn=predict,
+                        cache_examples=False)
+            tts_button.click(predict, [input_text_gr, style_gr, ref_gr, tos_gr], outputs=[out_text_gr, audio_gr, ref_audio_gr])
 
-# Configurar la aplicación Gradio
-demo.queue(max_size=10)
-demo.launch(
-    debug=False,
-    share=args.share,
-    server_name="0.0.0.0" if args.share else None,
-    server_port=7860
-)
+demo.queue()  
+demo.launch(debug=True, show_api=True, share=args.share)
