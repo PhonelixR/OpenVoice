@@ -1,4 +1,4 @@
-# openvoice_app.py - Versión con selección V1/V2
+# openvoice_app.py - Versión con selección V1/V2 (Compatible Gradio 5.50.0)
 import os
 import torch
 import argparse
@@ -184,8 +184,8 @@ def predict(version, prompt, style, audio_file_pth, agree):
     text_hint += f"✅ Audio generated successfully using OpenVoice {version}\n"
     return text_hint, save_path, audio_file_pth
 
-# Interfaz
-with gr.Blocks(title="OpenVoice V1 & V2", theme=gr.themes.Soft()) as demo:
+# Interfaz - CORREGIDA para Gradio 5.50.0
+with gr.Blocks(title="OpenVoice V1 & V2") as demo:
     gr.Markdown("""
     # 🎙 OpenVoice - Versión Dual (V1 & V2)
     Clone voices instantly using either OpenVoice V1 or V2.
@@ -200,38 +200,49 @@ with gr.Blocks(title="OpenVoice V1 & V2", theme=gr.themes.Soft()) as demo:
                 info="V1: Emotion styles | V2: Accent/Language styles"
             )
             
-            # Actualizar estilos dinámicamente
+            # Inicializar con estilos V1, luego se actualizarán dinámicamente
             style = gr.Dropdown(
-                label="Style",
+                label="Style (select version first)",
                 value="default",
-                info="Select style (V1: emotions, V2: accents)"
+                choices=v1_styles,
+                allow_custom_value=False
             )
             
             def update_styles(version):
                 if version == "V1":
-                    return gr.Dropdown(choices=v1_styles, value="default")
+                    return gr.Dropdown(
+                        choices=v1_styles, 
+                        value="default",
+                        label="Style (Emotions)",
+                        allow_custom_value=False
+                    )
                 else:
-                    return gr.Dropdown(choices=v2_styles, value=v2_styles[0] if v2_styles else "en-default")
+                    # Para V2, usar el primer estilo disponible
+                    first_style = v2_styles[0] if v2_styles else "en-default"
+                    return gr.Dropdown(
+                        choices=v2_styles, 
+                        value=first_style,
+                        label="Style (Accents/Languages)",
+                        allow_custom_value=False
+                    )
             
             version.change(update_styles, inputs=version, outputs=style)
             
             input_text = gr.Textbox(
-                label="Text Prompt",
+                label="Text Prompt (max 200 characters)",
                 value="Hello, this is my cloned voice using OpenVoice",
-                info="Enter text to synthesize (max 200 chars)"
+                lines=3
             )
             
             ref_audio = gr.Audio(
-                label="Reference Audio",
+                label="Reference Audio - Upload or record a short sample (3-10 seconds)",
                 type="filepath",
-                value="resources/demo_speaker2.mp3",
-                info="Upload or record a short audio sample (3-10 seconds)"
+                value="resources/demo_speaker2.mp3"
             )
             
             agree = gr.Checkbox(
-                label="Accept Terms",
-                value=False,
-                info="I agree to the terms (cc-by-nc-4.0)"
+                label="I agree to the terms (cc-by-nc-4.0 license)",
+                value=False
             )
             
             generate_btn = gr.Button("Generate Audio", variant="primary")
@@ -262,11 +273,12 @@ with gr.Blocks(title="OpenVoice V1 & V2", theme=gr.themes.Soft()) as demo:
         outputs=[output_text, output_audio, reference_used]
     )
 
-# Lanzar
+# Lanzar - usando theme en launch para evitar warning
 if name == "main":
     demo.launch(
         debug=False,
         share=args.share,
         server_name="0.0.0.0" if args.share else None,
-        server_port=7860
+        server_port=7860,
+        theme=gr.themes.Soft()
     )
