@@ -1,194 +1,178 @@
 import re
 import json
 import numpy as np
+from typing import Any, Dict, List, Optional, Union
 
 
-def get_hparams_from_file(config_path):
+def get_hparams_from_file(config_path: str) -> 'HParams':
+    """Load hyperparameters from JSON configuration file."""
     with open(config_path, "r", encoding="utf-8") as f:
         data = f.read()
     config = json.loads(data)
+    return HParams(**config)
 
-    hparams = HParams(**config)
-    return hparams
 
 class HParams:
-    def __init__(self, **kwargs):
+    """Hyperparameters container with dictionary-like and attribute-like access."""
+    
+    def init(self, **kwargs):
         for k, v in kwargs.items():
-            if isinstance(v, dict):  # Cambiado de type(v) == dict a isinstance
+            if isinstance(v, dict):
                 v = HParams(**v)
-            self[k] = v
-
+            setattr(self, k, v)
+    
     def keys(self):
-        return self.__dict__.keys()
-
+        return self.dict.keys()
+    
     def items(self):
-        return self.__dict__.items()
-
+        return self.dict.items()
+    
     def values(self):
-        return self.__dict__.values()
-
-    def __len__(self):
-        return len(self.__dict__)
-
-    def __getitem__(self, key):
+        return self.dict.values()
+    
+    def len(self):
+        return len(self.dict)
+    
+    def getitem(self, key):
         return getattr(self, key)
+    
+    def setitem(self, key, value):
+        setattr(self, key, value)
+    
+    def contains(self, key):
+        return key in self.dict
+    
+    def repr(self):
+        return f"HParams({self.dict})"
+    
+    def get(self, key, default=None):
+        """Dictionary-style get with default."""
+        return getattr(self, key, default)
+    
+    def to_dict(self):
+        """Convert to nested dictionary."""
+        result = {}
+        for k, v in self.dict.items():
+            if isinstance(v, HParams):
+                result[k] = v.to_dict()
+            else:
+                result[k] = v
+        return result
 
-    def __setitem__(self, key, value):
-        return setattr(self, key, value)
 
-    def __contains__(self, key):
-        return key in self.__dict__
-
-    def __repr__(self):
-        return self.__dict__.__repr__()
-
-
-def string_to_bits(string, pad_len=8):
-    # Convert each character to its ASCII value
+def string_to_bits(string: str, pad_len: int = 8) -> np.ndarray:
+    """Convert string to 8-bit binary array with padding."""
     ascii_values = [ord(char) for char in string]
-    
-    # Convert ASCII values to binary representation
     binary_values = [bin(value)[2:].zfill(8) for value in ascii_values]
-    
-    # Convert binary strings to integer arrays
     bit_arrays = [[int(bit) for bit in binary] for binary in binary_values]
     
-    # Convert list of arrays to NumPy array
-    numpy_array = np.array(bit_arrays, dtype=np.uint8)  # Especificar dtype explícitamente
-    numpy_array_full = np.zeros((pad_len, 8), dtype=np.uint8)  # Especificar dtype explícitamente
-    numpy_array_full[:, 2] = 1
-    max_len = min(pad_len, len(numpy_array))
-    numpy_array_full[:max_len] = numpy_array[:max_len]
-    return numpy_array_full
-
-
-def bits_to_string(bits_array):
-    # Convert each row of the array to a binary string
-    binary_values = [''.join(str(bit) for bit in row) for row in bits_array]
+    numpy_array = np.array(bit_arrays, dtype=np.uint8)
     
-    # Convert binary strings to ASCII values
-    ascii_values = [int(binary, 2) for binary in binary_values]
-    
-    # Convert ASCII values to characters
-    output_string = ''.join(chr(value) for value in ascii_values)
-    
-    return output_string
-
-
-def split_sentence(text, min_len=10, language_str='[EN]'):
-    if language_str in ['EN']:
-        sentences = split_sentences_latin(text, min_len=min_len)
+    # Handle padding
+    if len(numpy_array) < pad_len:
+        padded = np.zeros((pad_len, 8), dtype=np.uint8)
+        padded[:len(numpy_array)] = numpy_array
+        # Fill padding with zeros (or space character bits: 00100000)
+        return padded
     else:
-        sentences = split_sentences_zh(text, min_len=min_len)
-    return sentences
-
-def split_sentences_latin(text, min_len=10):
-    """Split Long sentences into list of short ones
-
-    Args:
-        str: Input sentences.
-
-    Returns:
-        List[str]: list of output sentences.
-    """
-    # deal with dirty sentences
-    text = re.sub('[。！？；]', '.', text)
-    text = re.sub('[，]', ',', text)
-    text = re.sub('[“”]', '"', text)
-    text = re.sub('[‘’]', "'", text)
-    text = re.sub(r"[\<\>\(\)\[\]\"\«\»]+", "", text)
-    text = re.sub('[\n\t ]+', ' ', text)
-    text = re.sub('([,.!?;])', r'\1 $#!', text)
-    # split
-    sentences = [s.strip() for s in text.split('$#!')]
-    if len(sentences[-1]) == 0: del sentences[-1]
-
-    new_sentences = []
-    new_sent = []
-    count_len = 0
-    for ind, sent in enumerate(sentences):
-        # print(sent)
-        new_sent.append(sent)
-        count_len += len(sent.split(" "))
-        if count_len > min_len or ind == len(sentences) - 1:
-            count_len = 0
-            new_sentences.append(' '.join(new_sent))
-            new_sent = []
-    return merge_short_sentences_latin(new_sentences)
+        return numpy_array[:pad_len]
 
 
-def merge_short_sentences_latin(sens):
-    """Avoid short sentences by merging them with the following sentence.
+def bits_to_string(bits_array: np.ndarray) -> str:
+    """Convert 8-bit binary array back to string."""
+    # Flatten if needed and reshape to (n, 8)
+    if bits_array.ndim == 1:
+        if len(bits_array) % 8 != 0:
+            # Pad to multiple of 8
+            bits_array = np.pad(bits_array, (0, 8 - len(bits_array) % 8))
+        bits_array = bits_array.reshape(-1, 8)
+    
+    # Convert to string
+    chars = []
+    for row in bits_array:
+        # Convert bits to integer
+        byte_val = 0
+        for i in range(8):
+            if i < len(row) and row[i]:
+                byte_val |= (1 << (7 - i))
+        
+        # Skip null bytes at the end
+        if byte_val == 0:
+            continue
+        
+        chars.append(chr(byte_val))
+    
+    return ''.join(chars).rstrip('\x00')
 
-    Args:
-        List[str]: list of input sentences.
 
-    Returns:
-        List[str]: list of output sentences.
-    """
-    sens_out = []
-    for s in sens:
-        # If the previous sentence is too short, merge them with
-        # the current sentence.
-        if len(sens_out) > 0 and len(sens_out[-1].split(" ")) <= 2:
-            sens_out[-1] = sens_out[-1] + " " + s
+def split_sentence(text: str, min_len: int = 10, language_str: str = '[EN]') -> List[str]:
+    """Split text into sentences based on language."""
+    if language_str in ['EN', 'en', 'English']:
+        return split_sentences_latin(text, min_len=min_len)
+    else:
+        return split_sentences_zh(text, min_len=min_len)
+
+
+def split_sentences_latin(text: str, min_len: int = 10) -> List[str]:
+    """Split Latin text into sentences."""
+    # Normalize punctuation
+    text = re.sub(r'[。！？；]', '.', text)
+    text = re.sub(r'[，]', ',', text)
+    text = re.sub(r'[“”「」]', '"', text)
+    text = re.sub(r'[‘’『』]', "'", text)
+    text = re.sub(r'[\<\>\(\)\[\]\"\«\»]+', "", text)
+    text = re.sub(r'[\n\t ]+', ' ', text)
+    text = re.sub(r'([,.!?;])', r'\1 $#!', text)
+    
+    # Split
+    sentences = [s.strip() for s in text.split('$#!') if s.strip()]
+    
+    # Group sentences by length
+    return _group_sentences_by_length(sentences, min_len, is_latin=True)
+
+
+def split_sentences_zh(text: str, min_len: int = 10) -> List[str]:
+    """Split Chinese text into sentences."""
+    text = re.sub(r'[。！？；]', '.', text)
+    text = re.sub(r'[，]', ',', text)
+    text = re.sub(r'[\n\t ]+', ' ', text)
+    text = re.sub(r'([,.!?;])', r'\1 $#!', text)
+    
+    sentences = [s.strip() for s in text.split('$#!') if s.strip()]
+    
+    # Group sentences by length
+    return _group_sentences_by_length(sentences, min_len, is_latin=False)
+
+
+def _group_sentences_by_length(sentences: List[str], min_len: int, is_latin: bool = True) -> List[str]:
+    """Group sentences to meet minimum length requirement."""
+    if not sentences:
+        return []
+    
+    grouped = []
+    current_group = []
+    current_length = 0
+    
+    for sent in sentences:
+        current_group.append(sent)
+        # Count words for Latin, characters for Chinese
+        current_length += len(sent.split()) if is_latin else len(sent)
+        
+        if current_length >= min_len:
+            grouped.append(' '.join(current_group))
+            current_group = []
+            current_length = 0
+    
+    # Handle last group
+    if current_group:
+        if grouped and current_length < 2:  # Very short last group
+            grouped[-1] = grouped[-1] + ' ' + ' '.join(current_group)
         else:
-            sens_out.append(s)
-    try:
-        if len(sens_out[-1].split(" ")) <= 2:
-            sens_out[-2] = sens_out[-2] + " " + sens_out[-1]
-            sens_out.pop(-1)
-    except:
-        pass
-    return sens_out
-
-def split_sentences_zh(text, min_len=10):
-    text = re.sub('[。！？；]', '.', text)
-    text = re.sub('[，]', ',', text)
-    # 将文本中的换行符、空格和制表符替换为空格
-    text = re.sub('[\n\t ]+', ' ', text)
-    # 在标点符号后添加一个空格
-    text = re.sub('([,.!?;])', r'\1 $#!', text)
-    # 分隔句子并去除前后空格
-    # sentences = [s.strip() for s in re.split('(。|！|？|；)', text)]
-    sentences = [s.strip() for s in text.split('$#!')]
-    if len(sentences[-1]) == 0: del sentences[-1]
-
-    new_sentences = []
-    new_sent = []
-    count_len = 0
-    for ind, sent in enumerate(sentences):
-        new_sent.append(sent)
-        count_len += len(sent)
-        if count_len > min_len or ind == len(sentences) - 1:
-            count_len = 0
-            new_sentences.append(' '.join(new_sent))
-            new_sent = []
-    return merge_short_sentences_zh(new_sentences)
+            grouped.append(' '.join(current_group))
+    
+    return grouped
 
 
-def merge_short_sentences_zh(sens):
-    # return sens
-    """Avoid short sentences by merging them with the following sentence.
-
-    Args:
-        List[str]: list of input sentences.
-
-    Returns:
-        List[str]: list of output sentences.
-    """
-    sens_out = []
-    for s in sens:
-        # If the previous sentense is too short, merge them with
-        # the current sentence.
-        if len(sens_out) > 0 and len(sens_out[-1]) <= 2:
-            sens_out[-1] = sens_out[-1] + " " + s
-        else:
-            sens_out.append(s)
-    try:
-        if len(sens_out[-1]) <= 2:
-            sens_out[-2] = sens_out[-2] + " " + sens_out[-1]
-            sens_out.pop(-1)
-    except:
-        pass
-    return sens_out
+# Backward compatibility
+merge_short_sentences_latin = lambda sens: _group_sentences_by_length(sens, 2, True)
+merge_short_sentences_zh = lambda sens: _group_sentences_by_length(sens, 2, False)
