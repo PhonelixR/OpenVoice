@@ -1,4 +1,4 @@
-# openvoice_app.py - Versión con selección V1/V2 (Compatible Gradio 5.50.0) - Sin gr.Examples
+# openvoice_app.py - Versión SIN archivo por defecto
 import os
 import torch
 import argparse
@@ -81,6 +81,12 @@ def predict(version, prompt, style, audio_file_pth, agree):
     if not agree:
         text_hint += '[ERROR] Please accept the Terms & Condition!\n'
         gr.Warning("Please accept the Terms & Condition!")
+        return text_hint, None, None
+    
+    # Verificar que se subió un audio
+    if not audio_file_pth:
+        text_hint += '[ERROR] Please upload a reference audio file\n'
+        gr.Warning("Please upload a reference audio file")
         return text_hint, None, None
 
     # Detectar idioma
@@ -184,7 +190,7 @@ def predict(version, prompt, style, audio_file_pth, agree):
     text_hint += f"✅ Audio generated successfully using OpenVoice {version}\n"
     return text_hint, save_path, audio_file_pth
 
-# Interfaz - Sin gr.Examples para evitar warnings
+# Interfaz - SIN archivo por defecto
 with gr.Blocks(title="OpenVoice V1 & V2") as demo:
     gr.Markdown("""
     # 🎙 OpenVoice - Versión Dual (V1 & V2)
@@ -236,8 +242,8 @@ with gr.Blocks(title="OpenVoice V1 & V2") as demo:
             
             ref_audio = gr.Audio(
                 label="Reference Audio - Upload or record a short sample (3-10 seconds)",
-                type="filepath",
-                value="resources/demo_speaker2.mp3"
+                type="filepath"
+                # SIN value por defecto
             )
             
             agree = gr.Checkbox(
@@ -247,43 +253,11 @@ with gr.Blocks(title="OpenVoice V1 & V2") as demo:
             
             with gr.Row():
                 generate_btn = gr.Button("Generate Audio", variant="primary", scale=2)
-                load_example_v1 = gr.Button("Load V1 Example", variant="secondary", scale=1)
-                load_example_v2 = gr.Button("Load V2 Example", variant="secondary", scale=1)
         
         with gr.Column(scale=1):
             output_text = gr.Textbox(label="Status", interactive=False, lines=4)
             output_audio = gr.Audio(label="Generated Audio", autoplay=True)
             reference_used = gr.Audio(label="Reference Audio Used", interactive=False)
-    
-    # Funciones para cargar ejemplos
-    def load_example_v1_func():
-        return [
-            "V1",  # version
-            "Hello, this is an example using OpenVoice V1 with default style.",  # prompt
-            "default",  # style
-            "resources/demo_speaker2.mp3",  # audio
-            True  # agree
-        ]
-    
-    def load_example_v2_func():
-        return [
-            "V2",  # version
-            "Hello, this is an example using OpenVoice V2 with English default accent.",  # prompt
-            "en-default",  # style
-            "resources/demo_speaker2.mp3",  # audio
-            True  # agree
-        ]
-    
-    # Conectar botones de ejemplo
-    load_example_v1.click(
-        fn=load_example_v1_func,
-        outputs=[version, input_text, style, ref_audio, agree]
-    )
-    
-    load_example_v2.click(
-        fn=load_example_v2_func,
-        outputs=[version, input_text, style, ref_audio, agree]
-    )
     
     generate_btn.click(
         fn=predict,
@@ -291,7 +265,7 @@ with gr.Blocks(title="OpenVoice V1 & V2") as demo:
         outputs=[output_text, output_audio, reference_used]
     )
 
-# Lanzar - usando theme en launch para evitar warning
+# Lanzar
 if name == "main":
     demo.launch(
         debug=False,
