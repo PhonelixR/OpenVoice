@@ -11,10 +11,11 @@ def get_hparams_from_file(config_path):
     hparams = HParams(**config)
     return hparams
 
+
 class HParams:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
-            if isinstance(v, dict):  # Cambiado de type(v) == dict a isinstance
+            if isinstance(v, dict):  # Mejor que type(v) == dict
                 v = HParams(**v)
             self[k] = v
 
@@ -54,8 +55,8 @@ def string_to_bits(string, pad_len=8):
     bit_arrays = [[int(bit) for bit in binary] for binary in binary_values]
     
     # Convert list of arrays to NumPy array
-    numpy_array = np.array(bit_arrays, dtype=np.uint8)  # Especificar dtype explícitamente
-    numpy_array_full = np.zeros((pad_len, 8), dtype=np.uint8)  # Especificar dtype explícitamente
+    numpy_array = np.array(bit_arrays, dtype=np.uint8)  # Explícito
+    numpy_array_full = np.zeros((pad_len, 8), dtype=np.uint8)  # Explícito
     numpy_array_full[:, 2] = 1
     max_len = min(pad_len, len(numpy_array))
     numpy_array_full[:max_len] = numpy_array[:max_len]
@@ -76,11 +77,13 @@ def bits_to_string(bits_array):
 
 
 def split_sentence(text, min_len=10, language_str='[EN]'):
-    if language_str in ['EN']:
+    # Corregido: compara con '[EN]' en lugar de 'EN'
+    if language_str == '[EN]':
         sentences = split_sentences_latin(text, min_len=min_len)
     else:
         sentences = split_sentences_zh(text, min_len=min_len)
     return sentences
+
 
 def split_sentences_latin(text, min_len=10):
     """Split Long sentences into list of short ones
@@ -92,22 +95,22 @@ def split_sentences_latin(text, min_len=10):
         List[str]: list of output sentences.
     """
     # deal with dirty sentences
-    text = re.sub('[。！？；]', '.', text)
-    text = re.sub('[，]', ',', text)
-    text = re.sub('[“”]', '"', text)
-    text = re.sub('[‘’]', "'", text)
+    text = re.sub(r'[。！？；]', '.', text)
+    text = re.sub(r'[，]', ',', text)
+    text = re.sub(r'[「」"“”]', '"', text)
+    text = re.sub(r'[‘’]', "'", text)
     text = re.sub(r"[\<\>\(\)\[\]\"\«\»]+", "", text)
-    text = re.sub('[\n\t ]+', ' ', text)
-    text = re.sub('([,.!?;])', r'\1 $#!', text)
+    text = re.sub(r'[\n\t ]+', ' ', text)
+    text = re.sub(r'([,.!?;])', r'\1 $#!', text)
     # split
     sentences = [s.strip() for s in text.split('$#!')]
-    if len(sentences[-1]) == 0: del sentences[-1]
+    if len(sentences[-1]) == 0:
+        del sentences[-1]
 
     new_sentences = []
     new_sent = []
     count_len = 0
     for ind, sent in enumerate(sentences):
-        # print(sent)
         new_sent.append(sent)
         count_len += len(sent.split(" "))
         if count_len > min_len or ind == len(sentences) - 1:
@@ -134,25 +137,25 @@ def merge_short_sentences_latin(sens):
             sens_out[-1] = sens_out[-1] + " " + s
         else:
             sens_out.append(s)
-    try:
-        if len(sens_out[-1].split(" ")) <= 2:
-            sens_out[-2] = sens_out[-2] + " " + sens_out[-1]
-            sens_out.pop(-1)
-    except:
-        pass
+    
+    if len(sens_out) > 1 and len(sens_out[-1].split(" ")) <= 2:
+        sens_out[-2] = sens_out[-2] + " " + sens_out[-1]
+        sens_out.pop(-1)
+    
     return sens_out
 
+
 def split_sentences_zh(text, min_len=10):
-    text = re.sub('[。！？；]', '.', text)
-    text = re.sub('[，]', ',', text)
+    text = re.sub(r'[。！？；]', '.', text)
+    text = re.sub(r'[，]', ',', text)
     # 将文本中的换行符、空格和制表符替换为空格
-    text = re.sub('[\n\t ]+', ' ', text)
+    text = re.sub(r'[\n\t ]+', ' ', text)
     # 在标点符号后添加一个空格
-    text = re.sub('([,.!?;])', r'\1 $#!', text)
+    text = re.sub(r'([,.!?;])', r'\1 $#!', text)
     # 分隔句子并去除前后空格
-    # sentences = [s.strip() for s in re.split('(。|！|？|；)', text)]
     sentences = [s.strip() for s in text.split('$#!')]
-    if len(sentences[-1]) == 0: del sentences[-1]
+    if len(sentences[-1]) == 0:
+        del sentences[-1]
 
     new_sentences = []
     new_sent = []
@@ -168,7 +171,6 @@ def split_sentences_zh(text, min_len=10):
 
 
 def merge_short_sentences_zh(sens):
-    # return sens
     """Avoid short sentences by merging them with the following sentence.
 
     Args:
@@ -185,10 +187,9 @@ def merge_short_sentences_zh(sens):
             sens_out[-1] = sens_out[-1] + " " + s
         else:
             sens_out.append(s)
-    try:
-        if len(sens_out[-1]) <= 2:
-            sens_out[-2] = sens_out[-2] + " " + sens_out[-1]
-            sens_out.pop(-1)
-    except:
-        pass
+    
+    if len(sens_out) > 1 and len(sens_out[-1]) <= 2:
+        sens_out[-2] = sens_out[-2] + " " + sens_out[-1]
+        sens_out.pop(-1)
+    
     return sens_out
