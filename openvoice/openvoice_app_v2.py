@@ -1,4 +1,4 @@
-# openvoice_app_v2.py - Versión con 3 opciones: V1, V2 (Legacy), V2 (MeloTTS) (Y puerto automático)
+# openvoice_app_v2.py - Versión con 3 opciones: V1, V2 (Legacy), V2 (MeloTTS) con control de velocidad (Y puerto automático)
 import os
 import torch
 import argparse
@@ -111,10 +111,6 @@ try:
             }
             
             print(f"    ✓ Modelo {lang} cargado ({len(speaker_ids_dict)} speakers)")
-            for speaker_name in list(speaker_ids_dict.keys())[:3]:
-                print(f"      - {speaker_name}")
-            if len(speaker_ids_dict) > 3:
-                print(f"      ... y {len(speaker_ids_dict) - 3} más")
                 
         except Exception as e:
             print(f"    ✗ Error cargando modelo {lang}: {e}")
@@ -166,13 +162,14 @@ v2_style_to_melo_config = {
     'en-newest': {'language': 'EN', 'speaker_name': 'EN_NEWEST'},
 }
 
-def predict(version, prompt, style, audio_file_pth, agree):
+def predict(version, prompt, style, audio_file_pth, agree, speed=1.0):
     print(f"\n🎯 PREDICCIÓN INICIADA:")
     print(f"   Versión: {version}")
     print(f"   Estilo: {style}")
     print(f"   Texto: {prompt[:50]}...")
     print(f"   Audio: {audio_file_pth}")
     print(f"   Aceptado: {agree}")
+    print(f"   Velocidad: {speed}")
     
     text_hint = ''
     
@@ -274,7 +271,7 @@ def predict(version, prompt, style, audio_file_pth, agree):
         
         melo_config = v2_style_to_melo_config[style]
         style_language = v2_style_to_language.get(style, style)
-        text_hint += f"Usando acento/estilo: {style_language} (con MeloTTS)\n"
+        text_hint += f"Usando acento/estilo: {style_language} (con MeloTTS, velocidad: {speed})\n"
         
         if melo_config['language'] not in melo_models:
             available_langs = list(melo_models.keys())
@@ -357,14 +354,14 @@ def predict(version, prompt, style, audio_file_pth, agree):
     
     else:
         try:
-            print(f"  → Generando con MeloTTS: {melo_config['language']}, speaker: {target_speaker_name} (ID: {target_speaker_id})")
+            print(f"  → Generando con MeloTTS: {melo_config['language']}, speaker: {target_speaker_name} (ID: {target_speaker_id}), velocidad: {speed}")
             
             # ¡ESTA ES LA LLAVE! Según la API que compartiste
             melo_model.tts_to_file(
                 text=prompt,
-                speaker_id=target_speaker_id,  # Número entero
-                output_path=src_path,  # output_path, NO file_path
-                speed=1.0,
+                speaker_id=target_speaker_id,
+                output_path=src_path,
+                speed=float(speed),  # Convertir a float y usar el valor del slider
                 quiet=True
             )
             print("✅ Audio base generado con MeloTTS")
@@ -376,7 +373,7 @@ def predict(version, prompt, style, audio_file_pth, agree):
             
             try:
                 print("  → Intentando método posicional...")
-                melo_model.tts_to_file(prompt, target_speaker_id, src_path, quiet=True)
+                melo_model.tts_to_file(prompt, target_speaker_id, src_path, speed=float(speed), quiet=True)
                 print("✅ Audio base generado con MeloTTS (método posicional)")
             except Exception as e2:
                 text_hint += f"[ERROR] Método alternativo también falló: {str(e2)}\n"
@@ -402,6 +399,7 @@ def predict(version, prompt, style, audio_file_pth, agree):
         text_hint += f"   Estilo: {style} ({v2_style_to_language.get(style, 'varios acentos')})\n"
         if "MeloTTS" in version:
             text_hint += f"   Motor TTS: MeloTTS ({melo_config['language']}/{target_speaker_name})\n"
+            text_hint += f"   Velocidad: {speed}\n"
         elif "Legacy" in version:
             text_hint += "   Motor TTS: OpenVoice V1 (legacy)\n"
     
@@ -411,7 +409,7 @@ print("\n" + "="*60)
 print("🎨 CREANDO INTERFAZ GRADIO...")
 print("="*60)
 
-with gr.Blocks(title="OpenVoice - 3 Motores TTS") as demo:
+with gr.Blocks(title="OpenVoice - 3 Motores TTS", theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
     # 🎙 OpenVoice - Tres Opciones de TTS
     ### V1: Original | V2 (Legacy): TTS de V1 | V2 (MeloTTS): Recomendado para V2
@@ -468,6 +466,16 @@ with gr.Blocks(title="OpenVoice - 3 Motores TTS") as demo:
                 value=False
             )
             
+            # Barra de velocidad (solo afecta a MeloTTS)
+            speed_slider = gr.Slider(
+                minimum=0.1,
+                maximum=4.0,
+                value=1.0,
+                step=0.1,
+                label="Velocidad de habla (solo para V2 MeloTTS)",
+                info="Más bajo = más lento, más alto = más rápido"
+            )
+            
             with gr.Row():
                 generate_btn = gr.Button("Generar Audio", variant="primary", scale=2)
         
@@ -491,6 +499,7 @@ with gr.Blocks(title="OpenVoice - 3 Motores TTS") as demo:
     **V2 (MeloTTS - Recomendado)**:
     - ✅ Usa MeloTTS como motor TTS (mejor calidad)
     - ✅ Soporta múltiples idiomas/acentos
+    - ✅ Control de velocidad (0.1x - 4.0x)
     - ✅ Recomendado para OpenVoice V2
     
     ### 🎯 Estilos V2 disponibles:
@@ -506,11 +515,17 @@ with gr.Blocks(title="OpenVoice - 3 Motores TTS") as demo:
     pip install git+https://github.com/myshell-ai/MeloTTS.git
     python -m unidic download
     ```
+    
+    ### 🎛️ Control de velocidad:
+    - Solo funciona con **V2 (MeloTTS)**
+    - Rango: 0.1 (muy lento) a 4.0 (muy rápido)
+    - Valor por defecto: 1.0 (velocidad normal)
+    - Para V1 y V2 Legacy, se ignora este ajuste
     """)
     
     generate_btn.click(
         fn=predict,
-        inputs=[version, input_text, style, ref_audio, agree],
+        inputs=[version, input_text, style, ref_audio, agree, speed_slider],
         outputs=[output_text, output_audio, reference_used]
     )
 
