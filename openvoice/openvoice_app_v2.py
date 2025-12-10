@@ -1,10 +1,11 @@
-# openvoice_app_v2.py - Versión que SIEMPRE muestra el enlace
+# openvoice_app_v2.py - Versión con 3 opciones: V1, V2 (Legacy), V2 (MeloTTS) (Y puerto automático)
 import os
 import torch
 import argparse
 import gradio as gr
 import langid
 import sys
+import socket
 from openvoice import se_extractor
 from openvoice.api import BaseSpeakerTTS, ToneColorConverter
 
@@ -14,10 +15,11 @@ sys.stderr.reconfigure(line_buffering=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--share", action='store_true', default=False, help="make link public")
+parser.add_argument("--port", type=int, default=7860, help="puerto para el servidor")
 args = parser.parse_args()
 
 print("="*60)
-print("🚀 INICIANDO OPENVOICE CON DEBUG ACTIVADO")
+print("🚀 INICIANDO OPENVOICE CON 3 MOTORES TTS")
 print("="*60)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -83,17 +85,56 @@ else:
 
 print(f"✅ MODELOS V2 CARGADOS (Embeddings: {len(v2_ses_embeddings)})")
 
-# Idiomas soportados - DIFERENTE PARA V1 Y V2
-v1_supported_languages = ['zh', 'en']  # V1 solo chino e inglés
-# V2 soporta todos los idiomas de sus embeddings
+# ========== CARGAR MODELO MELOTTS ==========
+print("\n📦 INTENTANDO CARGAR MELOTTS...")
+melo_models = {}
+melo_speakers_cache = {}
 
-# Estilos V1
+try:
+    from melo.api import TTS
+    print("  → Importando MeloTTS...")
+    
+    supported_languages = ['EN', 'ES', 'FR', 'ZH', 'JP', 'KR']
+    
+    for lang in supported_languages:
+        try:
+            print(f"  → Cargando modelo {lang}...")
+            model = TTS(language=lang, device=device)
+            melo_models[lang] = model
+            
+            speaker_ids_dict = model.hps.data.spk2id
+            
+            melo_speakers_cache[lang] = {
+                'model': model,
+                'speaker_ids': speaker_ids_dict,
+                'available_speakers': list(speaker_ids_dict.keys())
+            }
+            
+            print(f"    ✓ Modelo {lang} cargado ({len(speaker_ids_dict)} speakers)")
+            for speaker_name in list(speaker_ids_dict.keys())[:3]:
+                print(f"      - {speaker_name}")
+            if len(speaker_ids_dict) > 3:
+                print(f"      ... y {len(speaker_ids_dict) - 3} más")
+                
+        except Exception as e:
+            print(f"    ✗ Error cargando modelo {lang}: {e}")
+    
+    print("✅ MeloTTS cargado exitosamente")
+    
+except ImportError as e:
+    print(f"  ⚠️ No se pudo importar MeloTTS: {e}")
+    print("  ℹ️ Instala MeloTTS con: pip install git+https://github.com/myshell-ai/MeloTTS.git")
+except Exception as e:
+    print(f"  ⚠️ Error cargando MeloTTS: {e}")
+
+# Idiomas soportados
+v1_supported_languages = ['zh', 'en']
 v1_styles = ['default', 'whispering', 'cheerful', 'terrified', 'angry', 'sad', 'friendly']
 
-# Estilos V2 (usando los embeddings disponibles)
+# Estilos V2
 v2_styles = list(v2_ses_embeddings.keys())
 if not v2_styles:
-    v2_styles = ['en-default', 'en-us', 'zh']  # fallback
+    v2_styles = ['en-default', 'en-us', 'zh']
 
 # Mapear estilos V2 a idiomas sugeridos
 v2_style_to_language = {
@@ -108,6 +149,21 @@ v2_style_to_language = {
     'jp': 'Japonés',
     'kr': 'Coreano',
     'zh': 'Chino'
+}
+
+# Mapeo de estilos V2 a configuraciones de MeloTTS
+v2_style_to_melo_config = {
+    'es': {'language': 'ES', 'speaker_name': 'ES'},
+    'fr': {'language': 'FR', 'speaker_name': 'FR'},
+    'zh': {'language': 'ZH', 'speaker_name': 'ZH'},
+    'jp': {'language': 'JP', 'speaker_name': 'JP'},
+    'kr': {'language': 'KR', 'speaker_name': 'KR'},
+    'en-default': {'language': 'EN', 'speaker_name': 'EN'},
+    'en-us': {'language': 'EN', 'speaker_name': 'EN-US'},
+    'en-br': {'language': 'EN', 'speaker_name': 'EN-BR'},
+    'en-au': {'language': 'EN', 'speaker_name': 'EN-AU'},
+    'en-india': {'language': 'EN', 'speaker_name': 'EN_INDIA'},
+    'en-newest': {'language': 'EN', 'speaker_name': 'EN_NEWEST'},
 }
 
 def predict(version, prompt, style, audio_file_pth, agree):
@@ -138,14 +194,12 @@ def predict(version, prompt, style, audio_file_pth, agree):
     
     # ========== VERSIÓN 1 ==========
     if version == "V1":
-        print("📝 Usando V1")
-        # V1 tiene restricciones de idioma
+        print("📝 Usando V1 (OpenVoice original)")
         if language_predicted not in v1_supported_languages:
             text_hint += f"[ERROR] Idioma {language_predicted} no soportado en V1. Soporta: {v1_supported_languages}\n"
             gr.Warning(f"Idioma {language_predicted} no soportado en V1")
             return text_hint, None, None
 
-        # Configurar según idioma
         if language_predicted == "zh":
             tts_model = v1_zh_base_tts
             source_se = v1_zh_source_se
@@ -154,7 +208,7 @@ def predict(version, prompt, style, audio_file_pth, agree):
                 text_hint += "[ERROR] Chino solo soporta estilo 'default'\n"
                 gr.Warning("Chino solo soporta estilo 'default'")
                 return text_hint, None, None
-        else:  # inglés
+        else:
             tts_model = v1_en_base_tts
             language = 'English'
             if style == 'default':
@@ -162,7 +216,6 @@ def predict(version, prompt, style, audio_file_pth, agree):
             else:
                 source_se = v1_en_style_se
         
-        # Verificar estilo válido
         if language == 'English' and style not in v1_styles:
             text_hint += f"[ERROR] Estilo {style} no soportado para inglés V1\n"
             gr.Warning(f"Estilo {style} no soportado para inglés V1")
@@ -170,25 +223,96 @@ def predict(version, prompt, style, audio_file_pth, agree):
         
         converter = v1_tone_converter
     
-    # ========== VERSIÓN 2 ==========
-    else:  # V2
-        print("📝 Usando V2")
-        # Para V2, NO restringimos por idioma detectado
-        # El estilo de V2 define el acento/idioma
-        tts_model = v1_en_base_tts  # Usamos modelo base inglés
-        language = 'English'  # Siempre inglés para el modelo base
+    # ========== VERSIÓN 2 (LEGACY - TTS integrado de V1) ==========
+    elif version == "V2 (Legacy TTS)":
+        print("📝 Usando V2 con TTS integrado de OpenVoice V1 (Legacy)")
+        tts_model = v1_en_base_tts
+        language = 'English'
         
-        # Verificar que el estilo existe en los embeddings de V2
         if style not in v2_ses_embeddings:
             text_hint += f"[ERROR] Estilo '{style}' no encontrado en embeddings V2\n"
             gr.Warning(f"Estilo '{style}' no encontrado en embeddings V2")
             return text_hint, None, None
         
-        # Informar al usuario sobre el idioma del estilo seleccionado
         style_language = v2_style_to_language.get(style, style)
-        text_hint += f"Usando acento/estilo: {style_language}\n"
+        text_hint += f"Usando acento/estilo: {style_language} (con TTS Legacy)\n"
         
-        # Usar embedding de V2 como source
+        source_se = v2_ses_embeddings[style]
+        converter = v2_tone_converter
+    
+    # ========== VERSIÓN 2 (MELOTTS - RECOMENDADO) ==========
+    else:
+        print("📝 Usando V2 con MeloTTS (Recomendado)")
+        
+        if not melo_models:
+            text_hint += "[ERROR] MeloTTS no está disponible\n"
+            gr.Warning("MeloTTS no está disponible")
+            return text_hint, None, None
+        
+        if style not in v2_ses_embeddings:
+            text_hint += f"[ERROR] Estilo '{style}' no encontrado en embeddings V2\n"
+            gr.Warning(f"Estilo '{style}' no encontrado en embeddings V2")
+            return text_hint, None, None
+        
+        if style not in v2_style_to_melo_config:
+            if style.startswith('en-'):
+                melo_lang = 'EN'
+                melo_speaker = style.upper().replace('-', '_')
+            elif style in ['es', 'fr', 'zh', 'jp', 'kr']:
+                melo_lang = style.upper()
+                melo_speaker = style.upper()
+            else:
+                text_hint += f"[ERROR] Estilo '{style}' no compatible con MeloTTS\n"
+                gr.Warning(f"Estilo '{style}' no compatible con MeloTTS")
+                return text_hint, None, None
+            
+            v2_style_to_melo_config[style] = {
+                'language': melo_lang,
+                'speaker_name': melo_speaker
+            }
+            print(f"⚠️  Mapeo automático creado: {style} -> {melo_lang}/{melo_speaker}")
+        
+        melo_config = v2_style_to_melo_config[style]
+        style_language = v2_style_to_language.get(style, style)
+        text_hint += f"Usando acento/estilo: {style_language} (con MeloTTS)\n"
+        
+        if melo_config['language'] not in melo_models:
+            available_langs = list(melo_models.keys())
+            text_hint += f"[ERROR] Idioma {melo_config['language']} no disponible\n"
+            gr.Warning(f"Idioma {melo_config['language']} no disponible")
+            return text_hint, None, None
+        
+        melo_model = melo_models[melo_config['language']]
+        melo_speakers_info = melo_speakers_cache[melo_config['language']]
+        speaker_ids_dict = melo_speakers_info['speaker_ids']
+        
+        target_speaker_name = None
+        target_speaker_id = None
+        
+        possible_names = [
+            melo_config['speaker_name'],
+            melo_config['speaker_name'].replace('_', '-'),
+            melo_config['speaker_name'].replace('-', '_'),
+            melo_config['speaker_name'].lower(),
+            melo_config['speaker_name'].upper(),
+            style.replace('-', '_').upper(),
+            style.upper().replace('-', '_'),
+        ]
+        
+        for test_name in possible_names:
+            if test_name in speaker_ids_dict:
+                target_speaker_name = test_name
+                target_speaker_id = speaker_ids_dict[test_name]
+                break
+        
+        if target_speaker_name is None:
+            available_speakers = melo_speakers_info['available_speakers']
+            text_hint += f"[ERROR] Speaker '{melo_config['speaker_name']}' no encontrado\n"
+            gr.Warning(f"Speaker '{melo_config['speaker_name']}' no encontrado")
+            return text_hint, None, None
+        
+        print(f"  → Speaker encontrado: {target_speaker_name} (ID: {target_speaker_id})")
+        
         source_se = v2_ses_embeddings[style]
         converter = v2_tone_converter
 
@@ -198,7 +322,7 @@ def predict(version, prompt, style, audio_file_pth, agree):
         gr.Warning("Por favor escribe un texto más largo")
         return text_hint, None, None
         
-    if len(prompt) > 500:  # Aumentado a 500 para V2
+    if len(prompt) > 500:
         text_hint += "[ERROR] Texto limitado a 500 caracteres\n"
         gr.Warning("Texto limitado a 500 caracteres")
         return text_hint, None, None
@@ -225,11 +349,39 @@ def predict(version, prompt, style, audio_file_pth, agree):
     
     if version == "V1":
         tts_model.tts(prompt, src_path, speaker=style, language=language)
-    else:  # V2
-        # Para V2, usamos estilo 'default' ya que el embedding ya tiene el acento
-        tts_model.tts(prompt, src_path, speaker='default', language='English')
+        print("✅ Audio base generado con TTS V1")
     
-    print("✅ Audio base generado")
+    elif version == "V2 (Legacy TTS)":
+        tts_model.tts(prompt, src_path, speaker='default', language='English')
+        print("✅ Audio base generado con TTS Legacy (V1)")
+    
+    else:
+        try:
+            print(f"  → Generando con MeloTTS: {melo_config['language']}, speaker: {target_speaker_name} (ID: {target_speaker_id})")
+            
+            # ¡ESTA ES LA LLAVE! Según la API que compartiste
+            melo_model.tts_to_file(
+                text=prompt,
+                speaker_id=target_speaker_id,  # Número entero
+                output_path=src_path,  # output_path, NO file_path
+                speed=1.0,
+                quiet=True
+            )
+            print("✅ Audio base generado con MeloTTS")
+            
+        except Exception as e:
+            text_hint += f"[ERROR] Error generando audio con MeloTTS: {str(e)}\n"
+            gr.Warning("Error generando audio con MeloTTS")
+            print(f"❌ Error MeloTTS: {e}")
+            
+            try:
+                print("  → Intentando método posicional...")
+                melo_model.tts_to_file(prompt, target_speaker_id, src_path, quiet=True)
+                print("✅ Audio base generado con MeloTTS (método posicional)")
+            except Exception as e2:
+                text_hint += f"[ERROR] Método alternativo también falló: {str(e2)}\n"
+                print(f"❌ Error alternativo: {e2}")
+                return text_hint, None, None
 
     # Convertir voz
     save_path = f'{output_dir}/output.wav'
@@ -245,9 +397,13 @@ def predict(version, prompt, style, audio_file_pth, agree):
     )
     
     print(f"✅ Audio final guardado en: {save_path}")
-    text_hint += f"✅ Audio generado exitosamente usando OpenVoice {version}\n"
-    if version == "V2":
+    text_hint += f"✅ Audio generado exitosamente usando {version}\n"
+    if version != "V1":
         text_hint += f"   Estilo: {style} ({v2_style_to_language.get(style, 'varios acentos')})\n"
+        if "MeloTTS" in version:
+            text_hint += f"   Motor TTS: MeloTTS ({melo_config['language']}/{target_speaker_name})\n"
+        elif "Legacy" in version:
+            text_hint += "   Motor TTS: OpenVoice V1 (legacy)\n"
     
     return text_hint, save_path, audio_file_pth
 
@@ -255,23 +411,21 @@ print("\n" + "="*60)
 print("🎨 CREANDO INTERFAZ GRADIO...")
 print("="*60)
 
-# Interfaz - CON descripción mejorada para V2
-with gr.Blocks(title="OpenVoice V1 & V2", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="OpenVoice - 3 Motores TTS") as demo:
     gr.Markdown("""
-    # 🎙 OpenVoice - Versión Dual (V1 & V2)
-    ### V1: Clonación con emociones | V2: Clonación con acentos/idiomas
+    # 🎙 OpenVoice - Tres Opciones de TTS
+    ### V1: Original | V2 (Legacy): TTS de V1 | V2 (MeloTTS): Recomendado para V2
     """)
     
     with gr.Row():
         with gr.Column(scale=1):
             version = gr.Radio(
-                ["V1", "V2"],
-                label="Versión de OpenVoice",
+                ["V1", "V2 (Legacy TTS)", "V2 (MeloTTS)"],
+                label="Versión & Motor TTS",
                 value="V1",
-                info="V1: Emociones (solo en/zh) | V2: Acentos/idiomas (multilingüe)"
+                info="V1: Original. V2 (Legacy): Usa TTS de V1. V2 (MeloTTS): Recomendado para V2"
             )
             
-            # Inicializar con estilos V1, luego se actualizarán dinámicamente
             style = gr.Dropdown(
                 label="Estilo",
                 value="default",
@@ -288,12 +442,11 @@ with gr.Blocks(title="OpenVoice V1 & V2", theme=gr.themes.Soft()) as demo:
                         allow_custom_value=False
                     )
                 else:
-                    # Para V2, usar el primer estilo disponible
                     first_style = v2_styles[0] if v2_styles else "en-default"
                     return gr.Dropdown(
                         choices=v2_styles, 
                         value=first_style,
-                        label="Estilo/Acento (selecciona idioma)",
+                        label="Estilo/Acento (selecciona idioma para V2)",
                         allow_custom_value=False
                     )
             
@@ -323,11 +476,22 @@ with gr.Blocks(title="OpenVoice V1 & V2", theme=gr.themes.Soft()) as demo:
             output_audio = gr.Audio(label="Audio Generado", autoplay=True)
             reference_used = gr.Audio(label="Audio de Referencia Usado", interactive=False)
     
-    # Información sobre versiones
     gr.Markdown("""
     ### 📚 Información de Versiones:
-    - V1: Soporta inglés (con emociones) y chino (solo estilo default)
-    - V2: Soporta múltiples idiomas/acentos vía selección de estilo
+    
+    **V1 (OpenVoice Original)**:
+    - ✅ Soporta inglés (con emociones) y chino (solo estilo default)
+    - ❌ Limitado a 2 idiomas
+    
+    **V2 (Legacy TTS)**:
+    - ⚠️ Usa el TTS integrado de OpenVoice V1
+    - ✅ Soporta múltiples idiomas/acentos vía selección de estilo
+    - ⚠️ Calidad de TTS limitada
+    
+    **V2 (MeloTTS - Recomendado)**:
+    - ✅ Usa MeloTTS como motor TTS (mejor calidad)
+    - ✅ Soporta múltiples idiomas/acentos
+    - ✅ Recomendado para OpenVoice V2
     
     ### 🎯 Estilos V2 disponibles:
     - es - Español
@@ -337,10 +501,11 @@ with gr.Blocks(title="OpenVoice V1 & V2", theme=gr.themes.Soft()) as demo:
     - zh - Chino
     - Varios acentos ingleses (en-us, en-au, en-br, etc.)
     
-    ### 💡 Consejos:
-    1. Sube un audio claro de 3-10 segundos
-    2. En V2, el texto puede estar en cualquier idioma - el acento lo determina el estilo
-    3. Textos más largos funcionan mejor que muy cortos
+    ### 💡 Instalación de MeloTTS (requerido para V2 MeloTTS):
+    ```bash
+    pip install git+https://github.com/myshell-ai/MeloTTS.git
+    python -m unidic download
+    ```
     """)
     
     generate_btn.click(
@@ -355,17 +520,51 @@ print("="*60)
 print("📢 SI TODO VA BIEN, VERÁS UN ENLACE ABAJO:")
 print("="*60)
 
-# FORZAR que se muestre el enlace - lanzar con todas las opciones de debug
-demo.launch(
-    debug=True,           # Modo debug
-    share=args.share,
-    server_name="0.0.0.0",
-    server_port=7860,
-    quiet=False,          # No silencioso
-    show_error=True,      # Mostrar errores
-    show_api=True,        # Mostrar API
-)
+def find_free_port(start_port=7860, max_attempts=10):
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('', port))
+                return port
+        except OSError:
+            continue
+    return start_port
+
+target_port = args.port
+attempts = 0
+max_attempts = 5
+
+while attempts < max_attempts:
+    try:
+        print(f"🔧 Intentando con puerto: {target_port}")
+        
+        demo.launch(
+            debug=True,
+            share=args.share,
+            server_name="0.0.0.0",
+            server_port=target_port,
+            quiet=False,
+            show_error=True,
+            show_api=True,
+        )
+        break
+        
+    except OSError as e:
+        if "Address already in use" in str(e) or "address already in use" in str(e).lower():
+            print(f"⚠️  Puerto {target_port} ocupado, buscando puerto libre...")
+            target_port = find_free_port(target_port + 1)
+            attempts += 1
+        else:
+            print(f"❌ Error inesperado: {e}")
+            raise
+    except Exception as e:
+        print(f"❌ Error al lanzar la aplicación: {e}")
+        break
+
+if attempts >= max_attempts:
+    print("❌ No se pudo encontrar un puerto libre después de varios intentos")
+    print("💡 Intenta detener otras instancias de Gradio o especifica un puerto diferente con --port")
 
 print("\n" + "="*60)
-print("📝 LA APLICACIÓN SE HA LANZADO (o ha fallado silenciosamente)")
+print("📝 APLICACIÓN FINALIZADA")
 print("="*60)
